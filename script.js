@@ -86,7 +86,7 @@
       cat: CAT[r.cat] ? r.cat : 'n', ing: asArr(r.ing).map(String), steps: asArr(r.steps).map(String), custom: true, by: r.by || null
     }));
     RECIPES = BASE.concat(s.custom);
-    s.overrides = (s.overrides && typeof s.overrides === 'object' && !Array.isArray(s.overrides)) ? s.overrides : {};
+    s.overrides = normMeals(s.overrides);
     s.protein = asArr(s.protein).map(Number);
     s.meals = normMeals(s.meals);
     s.startCook = (Number(s.startCook) || 0) % s.members.length;
@@ -133,9 +133,15 @@
   const N = () => S.members.length;
   const member = (id) => S.members.find((m) => m.id === id) || null;
   const mName = (id) => (member(id) ? member(id).name : 'بدون توزيع');
-  const ov = (d, k) => (S.overrides[d] && member(S.overrides[d][k]) ? S.overrides[d][k] : null);
-  const cookId = (d) => ov(d, 'cook') || S.members[(S.startCook + d) % N()].id;
-  const cleanId = (d) => ov(d, 'clean') || S.members[(S.startCook + d + (N() > 1 ? 1 : 0)) % N()].id;
+  const ov = (d, k) => {
+    const v = S.overrides[d] && S.overrides[d][k];
+    const a = (typeof v === 'string' ? [v] : asArr(v)).filter((x) => member(x));
+    return a.length ? a : null;
+  };
+  const cooks = (d) => ov(d, 'cook') || [S.members[(S.startCook + d) % N()].id];
+  const cookId = (d) => cooks(d)[0];
+  const cleans = (d) => ov(d, 'clean') || [S.members[(S.startCook + d + (N() > 1 ? 1 : 0)) % N()].id];
+  const cleanId = (d) => cleans(d)[0];
   const isProtein = (d) => S.protein.includes(d);
   const catOfDay = (d) => (isProtein(d) ? 'p' : 'n');
   const recipeById = (id) => RECIPES.find((r) => r.id === id);
@@ -211,7 +217,7 @@
     const t = todayIdx();
     const meal = S.meals[t] ? recipeById(S.meals[t]) : null;
     $('#todayLine').textContent =
-      `اليوم ${DAYS[t]}: الطبخ ${mName(cookId(t))} — ${isProtein(t) ? 'بروتين' : 'بدون بروتين'}` +
+      `اليوم ${DAYS[t]}: الطبخ ${cooks(t).map(mName).join(' و')} — ${isProtein(t) ? 'بروتين' : 'بدون بروتين'}` +
       (meal ? ` — ${meal.name}` : '');
     const m = me();
     $('#meBtn').textContent = m ? `👤 ${m.name}` : '👤 مين انتي؟';
@@ -222,7 +228,7 @@
     let cook = 0;
     let cookPro = 0;
     for (let d = 0; d < 7; d++) {
-      if (cookId(d) === id) { cook++; if (isProtein(d)) cookPro++; }
+      if (cooks(d).includes(id)) { cook++; if (isProtein(d)) cookPro++; }
     }
     return {
       open: S.tasks.filter((t) => t.who === id && !t.done).length,
@@ -381,8 +387,8 @@
         <button class="ghost" data-act="editday" data-d="${d}" aria-label="تعديل المسؤولة">✏️</button><button class="kind" data-act="toggleprotein" data-d="${d}">${pro ? '🍗 بروتين' : '🥗 بدون بروتين'}</button>
       </header>
       <dl>
-        <div><dt>الطبخ</dt><dd>${mcSpan(cookId(d))}</dd></div>
-        <div><dt>الترتيب والتنظيف</dt><dd>${mcSpan(cleanId(d))}</dd></div>
+        <div><dt>الطبخ</dt><dd>${cooks(d).map((x) => mcSpan(x)).join('، ')}</dd></div>
+        <div><dt>الترتيب والتنظيف</dt><dd>${cleans(d).map((x) => mcSpan(x)).join('، ')}</dd></div>
       </dl>
       <div class="meal">
         ${r ? `<div class="mealline">
@@ -524,6 +530,7 @@
       S.log.unshift({ id: t.id, title: t.title, by: m.id, byName: m.name, at: t.doneAt, assigned: t.who || null, pts: t.pts || 10 });
       S.log = S.log.slice(0, 300);
       if (!S.tasks.some((x) => x.who === m.id && !x.done)) S.log[0].all = true;
+      pushNotify(S.log[0].all ? 'برافو 🎉' : 'مهمة اتنفّذت', `${m.name} ${S.log[0].all ? 'خلّصت كل مهامها 🎉' : `خلّصت «${t.title}» ✔`}`);
       toast(S.log[0].all ? `برافو يا ${m.name}! خلّصتي كل مهامك 🎉` : `تسجّلت باسمك يا ${m.name} ✔ (+${t.pts || 10}⭐)`);
     } else {
       t.done = false;
@@ -882,10 +889,11 @@
   }
 
   function daySheet(d) {
+    const chk = (k, cur) => S.members.map((m) => `<label class="chip"><input type="checkbox" name="ov-${k}" value="${m.id}" ${cur.includes(m.id) ? 'checked' : ''}> ${esc(m.name)}</label>`).join('');
     const opts = (cur) => S.members.map((m) => `<option value="${m.id}" ${m.id === cur ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
     openSheet(`<h2>مسؤولات ${DAYS[d]}</h2>
-      <label class="field">الطبخ<select id="ovCook">${opts(cookId(d))}</select></label>
-      <label class="field">الترتيب والتنظيف<select id="ovClean">${opts(cleanId(d))}</select></label>
+      <h4>الطبخ (تقدري تختاري أكتر من واحدة)</h4><div class="chips">${chk('cook', cooks(d))}</div>
+      <h4>الترتيب والتنظيف</h4><div class="chips">${chk('clean', cleans(d))}</div>
       <div class="row"><button class="btn" data-act="saveday" data-d="${d}">حفظ</button>
       <button class="btn soft" data-act="resetday" data-d="${d}">رجوع للدور التلقائي</button></div>`);
   }
@@ -906,7 +914,36 @@
     const body = p === 'granted' ? '<p class="help">مفعّلة ✔ هتوصلك تذكيرات مهام اليوم وإشعار لما حد يخلّص مهامه.</p>'
       : p === 'unsupported' ? '<p class="help">المتصفح ده مش بيدعم الإشعارات. على الآيفون ثبّتي التطبيق على الشاشة الرئيسية الأول.</p>'
       : '<button class="btn alt" data-act="notifon">تفعيل الإشعارات</button>';
-    return `<section class="panel"><h3 class="sub" style="margin-top:0">🔔 الإشعارات</h3>${body}<p class="help">بتوصل والتطبيق مفتوح أو في الخلفية. لو اتقفل تمامًا محتاجة سيرفر (Firebase Cloud Messaging).</p></section>`;
+    return `<section class="panel"><h3 class="sub" style="margin-top:0">🔔 الإشعارات</h3>${body}${wkUrl() ? '<p class="help">🔔 إشعارات التطبيق المقفول مفعّلة على الجهاز ده ✔</p>' : `<label class="field" style="margin-top:10px">رابط الـ Worker (للإشعارات والتطبيق مقفول)<input type="text" id="wkUrl" dir="ltr" placeholder="https://kitchen-push.xxx.workers.dev"></label><button class="btn alt" data-act="pushon" style="margin-top:8px">تفعيل إشعارات التطبيق المقفول</button>`}</section>`;
+  }
+
+  const PUSH_KEY = 'kitchen-push-v1';
+  const wkUrl = () => localStorage.getItem(PUSH_KEY) || '';
+  const u8 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+
+  async function enablePush(url) {
+    try {
+      url = String(url).trim().replace(/\/+$/, '');
+      if (!/^https:\/\/[^\s/]+/i.test(url)) { toast('الرابط لازم يبدأ بـ https://'); return; }
+      if (!getSync()) { toast('فعّلي المزامنة الأول'); return; }
+      if ((await Notification.requestPermission()) !== 'granted') { toast('لازم توافقي على الإشعارات'); return; }
+      const reg = await navigator.serviceWorker.ready;
+      const { key } = await (await fetch(`${url}/key`)).json();
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: u8(key) });
+      await caches.open('kitchen-cfg').then((c) => c.put('cfg', new Response(JSON.stringify({ wk: url }))));
+      const r = await fetch(`${url}/subscribe`, { method: 'POST', body: JSON.stringify({ room: getSync().room, me: me() ? me().id : '', sub: sub.toJSON() }) });
+      if (!r.ok) throw new Error(r.status);
+      localStorage.setItem(PUSH_KEY, url);
+      renderMembers();
+      toast('اتفعّلت الإشعارات حتى والتطبيق مقفول 🔔');
+    } catch (e) { toast('تعذّر التفعيل، اتأكدي من رابط الـ Worker'); }
+  }
+
+  function pushNotify(title, body) {
+    const c = getSync();
+    const m = me();
+    if (!c || !wkUrl() || !m) return;
+    fetch(`${wkUrl()}/notify`, { method: 'POST', body: JSON.stringify({ room: c.room, from: m.id, title, body }) }).catch(() => {});
   }
 
   function notify(title, body) {
@@ -925,8 +962,8 @@
     const t = todayIdx();
     const mine = S.tasks.filter((x) => x.who === m.id && !x.done && (x.day === t || x.day < 0));
     const parts = [];
-    if (cookId(t) === m.id) parts.push('النهارده دورك في الطبخ 🍳');
-    if (cleanId(t) === m.id) parts.push('ودورك في الترتيب والتنظيف 🧹');
+    if (cooks(t).includes(m.id)) parts.push('النهارده دورك في الطبخ 🍳');
+    if (cleans(t).includes(m.id)) parts.push('ودورك في الترتيب والتنظيف 🧹');
     if (mine.length) parts.push(`عندك ${mine.length} مهام: ${mine.slice(0, 3).map((x) => x.title).join('، ')}`);
     if (!parts.length) return;
     localStorage.setItem(REMIND_KEY, key);
@@ -1053,7 +1090,13 @@
         break;
       case 'editday': if (needAdmin()) daySheet(d); break;
       case 'saveday':
-        S.overrides[d] = { cook: $('#ovCook').value, clean: $('#ovClean').value };
+        {
+          const pick = (k) => [...document.querySelectorAll(`input[name="ov-${k}"]:checked`)].map((x) => x.value);
+          const ck = pick('cook');
+          const cl = pick('clean');
+          if (!ck.length || !cl.length) { toast('اختاري واحدة على الأقل في كل قسم'); break; }
+          S.overrides[d] = { cook: ck, clean: cl };
+        }
         save(); closeSheet(); renderAll(); toast('اتعدّلت مسؤولات اليوم');
         break;
       case 'resetday': delete S.overrides[d]; save(); closeSheet(); renderAll(); toast('رجع الدور التلقائي'); break;
@@ -1070,6 +1113,7 @@
         } else S.admins.push(id);
         save(); renderAll();
         break;
+      case 'pushon': enablePush($('#wkUrl').value); break;
       case 'notifon': Notification.requestPermission().then(() => { renderMembers(); dailyReminder(); }); break;
       case 'pickdessert': dessertSheet(d); break;
       case 'cleardessert': delete S.desserts[d]; save(); renderSchedule(); break;

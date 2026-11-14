@@ -2,14 +2,16 @@
   'use strict';
 
   /* ================= الثوابت ================= */
-  const RECIPES = window.RECIPES || [];
+  const BASE = window.RECIPES || [];
+  let RECIPES = BASE;
+  const CAT = { p: { i: '🍗', l: 'بروتين' }, n: { i: '🥗', l: 'بدون بروتين' }, d: { i: '🍰', l: 'حلويات' } };
   const DAYS = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
   const KEY = 'kitchen-week-v2';
   const OLD_KEY = 'kitchen-week-v1';
   const ME_KEY = 'kitchen-me-v1';
   const SYNC_KEY = 'kitchen-sync-v1';
   const COLORS = ['#1f7a8c', '#b5651d', '#7a4fa3', '#2e8b57', '#c2415a', '#3b5bdb', '#8a6d00', '#0f766e'];
-  const SHARED = ['members', 'startCook', 'protein', 'meals', 'tasks', 'log', 'admins', 'overrides'];
+  const SHARED = ['members', 'startCook', 'protein', 'meals', 'tasks', 'log', 'admins', 'overrides', 'desserts', 'custom'];
   const MAX_MEMBERS = 12;
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -78,6 +80,12 @@
     }));
     s.log = asArr(s.log);
     s.admins = asArr(s.admins).map(String);
+    s.desserts = normMeals(s.desserts);
+    s.custom = asArr(s.custom).filter((r) => r && r.id && r.name).map((r) => ({
+      id: String(r.id), name: String(r.name).slice(0, 40), time: String(r.time || '—').slice(0, 20),
+      cat: CAT[r.cat] ? r.cat : 'n', ing: asArr(r.ing).map(String), steps: asArr(r.steps).map(String), custom: true, by: r.by || null
+    }));
+    RECIPES = BASE.concat(s.custom);
     s.overrides = (s.overrides && typeof s.overrides === 'object' && !Array.isArray(s.overrides)) ? s.overrides : {};
     s.protein = asArr(s.protein).map(Number);
     s.meals = normMeals(s.meals);
@@ -366,6 +374,7 @@
     const pro = isProtein(d);
     const r = S.meals[d] ? recipeById(S.meals[d]) : null;
     const dayTasks = S.tasks.filter((t) => t.day === d);
+    const ds = S.desserts[d] ? recipeById(S.desserts[d]) : null;
     return `<article class="day ${pro ? 'pro' : 'veg'} ${d === today ? 'today' : ''}">
       <header>
         <h3>${DAYS[d]}${d === today ? '<span class="now">اليوم</span>' : ''}</h3>
@@ -385,6 +394,9 @@
           <button data-act="random" data-d="${d}">🎲 اقتراح عشوائي</button>
         </div>
       </div>
+      <div class="dessert">${ds
+        ? `<div class="mealline"><button class="mealname" data-act="viewrecipe" data-id="${ds.id}" data-d="${d}">🍰 ${esc(ds.name)}<small>${ds.time}</small></button><button class="ghost" data-act="cleardessert" data-d="${d}" aria-label="شيل الحلو">✕</button></div>`
+        : `<button class="btn soft" data-act="pickdessert" data-d="${d}">🍰 إضافة حلو (اختياري)</button>`}</div>
       ${dayTasks.length ? `<ul class="tasks mini">${dayTasks.map(taskRow).join('')}</ul>` : ''}
     </article>`;
   }
@@ -528,8 +540,8 @@
   /* ================= الوصفات ================= */
   function recipeCard(r, d) {
     return `<button class="rcard ${r.cat}" data-act="viewrecipe" data-id="${r.id}" ${d !== undefined ? `data-d="${d}"` : ''}>
-      <span class="ico">${r.cat === 'p' ? '🍗' : '🥗'}</span>
-      <span><b>${esc(r.name)}</b><small>${r.time} — ${r.cat === 'p' ? 'بروتين' : 'بدون بروتين'}</small></span>
+      <span class="ico">${CAT[r.cat].i}</span>
+      <span><b>${esc(r.name)}</b><small>${r.time} — ${CAT[r.cat].l}</small></span>
     </button>`;
   }
 
@@ -545,8 +557,9 @@
   function renderRecipes() {
     const chip = (f, label) => `<button class="chip ${recipeFilter === f ? 'on' : ''}" data-act="rfilter" data-f="${f}">${label}</button>`;
     $('#tab-recipes').innerHTML = `
+      <button class="btn gold" data-act="newrecipe" style="margin-bottom:10px">➕ وصفة جديدة</button>
       <input type="search" id="rsearch" placeholder="ابحثي باسم الأكلة أو مكوّن" value="${esc(recipeQuery)}">
-      <div class="chips">${chip('all', 'الكل')}${chip('p', '🍗 بروتين')}${chip('n', '🥗 بدون بروتين')}</div>
+      <div class="chips">${chip('all', 'الكل')}${chip('p', '🍗 بروتين')}${chip('n', '🥗 بدون بروتين')}${chip('d', '🍰 حلويات')}</div>
       <div class="rlist" id="rlist"></div>`;
     renderRecipeList();
   }
@@ -557,7 +570,7 @@
     const day = d === undefined ? todayIdx() : d;
     openSheet(`
       <h2>${esc(r.name)}</h2>
-      <span class="tag ${r.cat}">${r.cat === 'p' ? '🍗 بروتين' : '🥗 بدون بروتين'}</span>
+      <span class="tag ${r.cat}">${CAT[r.cat].i} ${CAT[r.cat].l}</span>
       <span class="muted"> ${r.time}</span>
       <h4>المكونات</h4>
       <ul class="list">${r.ing.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>
@@ -570,6 +583,7 @@
           </select>
         </label>
         <button class="btn" data-act="addmeal" data-id="${r.id}">إضافة للجدول</button>
+        ${r.custom && (isAdmin() || r.by === (me() || {}).id) ? `<button class="btn danger" data-act="delrecipe" data-id="${r.id}">حذف الوصفة</button>` : ''}
       </div>`);
   }
 
@@ -585,6 +599,7 @@
   function setMeal(d, id) {
     const r = recipeById(id);
     if (!r) return;
+    if (r.cat === 'd') { S.desserts[d] = id; save(); renderSchedule(); toast(`اتضاف حلو ${r.name} ليوم ${DAYS[d]}`); return; }
     const need = r.cat === 'p';
     if (need !== isProtein(d)) {
       S.protein = need ? [...S.protein, d] : S.protein.filter((x) => x !== d);
@@ -817,6 +832,35 @@
     toast('اتثبّت التطبيق');
   });
 
+  function dessertSheet(d) {
+    openSheet(`<h2>حلو ${DAYS[d]} 🍰</h2><p class="muted">اختياري: يتقدم بعد الأكل الأساسي</p>
+      <div class="rlist">${RECIPES.filter((r) => r.cat === 'd').map((r) => recipeCard(r, d)).join('')}</div>`);
+  }
+
+  function recipeForm() {
+    openSheet(`<h2>وصفة جديدة</h2><div class="addform">
+      <label class="field">اسم الأكلة<input type="text" id="rfName" maxlength="40"></label>
+      <div class="pair">
+        <label class="field">الوقت<input type="text" id="rfTime" maxlength="20" placeholder="٣٠ دقيقة"></label>
+        <label class="field">النوع<select id="rfCat"><option value="p">🍗 بروتين</option><option value="n">🥗 بدون بروتين</option><option value="d">🍰 حلويات</option></select></label>
+      </div>
+      <label class="field">المكونات (كل مكوّن في سطر)<textarea id="rfIng" rows="5"></textarea></label>
+      <label class="field">الطريقة (كل خطوة في سطر)<textarea id="rfSteps" rows="5"></textarea></label>
+      <button class="btn" data-act="saverecipe">حفظ الوصفة</button></div>`);
+  }
+
+  function saveRecipe() {
+    const name = $('#rfName').value.trim();
+    const lines = (s) => $(s).value.split('\n').map((x) => x.trim()).filter(Boolean);
+    const ing = lines('#rfIng');
+    const steps = lines('#rfSteps');
+    if (!name || !ing.length || !steps.length) { toast('اكتبي الاسم والمكونات والطريقة'); return; }
+    const m = me();
+    S.custom.push({ id: 'c' + Date.now().toString(36), cat: $('#rfCat').value, name: name.slice(0, 40), time: ($('#rfTime').value.trim() || '—').slice(0, 20), ing, steps, custom: true, by: m ? m.id : null });
+    RECIPES = BASE.concat(S.custom);
+    save(); closeSheet(); renderAll(); toast('اتضافت الوصفة ✔');
+  }
+
   /* ================= المتصدرين والأدمن والإشعارات ================= */
   let boardRange = 'week';
   const REMIND_KEY = 'kitchen-remind-v1';
@@ -892,6 +936,7 @@
   /* ================= التحكم والأحداث ================= */
   function renderAll() {
     renderBoard();
+    renderRecipes();
     renderSchedule();
     renderTasks();
     renderMembers();
@@ -1026,6 +1071,16 @@
         save(); renderAll();
         break;
       case 'notifon': Notification.requestPermission().then(() => { renderMembers(); dailyReminder(); }); break;
+      case 'pickdessert': dessertSheet(d); break;
+      case 'cleardessert': delete S.desserts[d]; save(); renderSchedule(); break;
+      case 'newrecipe': recipeForm(); break;
+      case 'saverecipe': saveRecipe(); break;
+      case 'delrecipe':
+        if (!confirm('حذف الوصفة دي؟')) break;
+        S.custom = S.custom.filter((r) => r.id !== id);
+        RECIPES = BASE.concat(S.custom);
+        save(); closeSheet(); renderAll(); toast('اتحذفت الوصفة');
+        break;
       default: break;
     }
   });

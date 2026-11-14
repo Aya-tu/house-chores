@@ -924,6 +924,10 @@
   async function enablePush(url) {
     let step = 'start';
     try {
+      if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+        alert('المتصفح ده مش بيدعم الإشعارات.\nجرّبي كروم أو فايرفوكس أو إيدج أو سامسونج إنترنت، ومتفتحيش اللينك من جوه واتساب أو تطبيق تاني.');
+        return;
+      }
       url = String(url).trim().replace(/\/+$/, '');
       if (!/^https:\/\/[^\s/]+/i.test(url)) { toast('الرابط لازم يبدأ بـ https://'); return; }
       if (!getSync()) { toast('فعّلي المزامنة الأول'); return; }

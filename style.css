@@ -569,3 +569,9 @@ body { padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
 .board .bw i { display: block; height: 8px; border-radius: 8px; background: var(--c); margin-top: 6px; min-width: 6px; }
 .board .pts { font-weight: 800; font-size: 1.2rem; color: var(--c); }
 .chip:disabled { opacity: 1; }
+
+.rcard.d { border-inline-start-color: var(--saffron); }
+.tag.d { background: #fdf0cf; color: #7a5a00; }
+.dessert { margin-top: 10px; }
+.dessert .btn { width: 100%; }
+textarea { width: 100%; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; font: inherit; }

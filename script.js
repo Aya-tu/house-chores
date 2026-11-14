@@ -11,13 +11,20 @@
   const ME_KEY = 'kitchen-me-v1';
   const SYNC_KEY = 'kitchen-sync-v1';
   const COLORS = ['#1f7a8c', '#b5651d', '#7a4fa3', '#2e8b57', '#c2415a', '#3b5bdb', '#8a6d00', '#0f766e'];
-  const SHARED = ['members', 'startCook', 'protein', 'meals', 'tasks', 'log', 'admins', 'overrides', 'desserts', 'custom'];
+  const SHARED = ['members', 'startCook', 'protein', 'meals', 'tasks', 'log', 'admins', 'overrides', 'desserts', 'custom', 'supers', 'duties', 'bank', 'wk', 'cleanDay', 'weeklyList'];
   const MAX_MEMBERS = 12;
+  const DUTY_COOK = 20;      // نقاط الطبخ
+  const DUTY_PRO = 10;       // زيادة لو يوم بروتين
+  const DUTY_CLEAN = 15;     // الترتيب والتنظيف العادي
+  const DUTY_AREA = 15;      // منطقة في تنظيف الجمعة
+  const DUTY_PERSONAL = 10;  // أوضتك وأغراضك في تنظيف الجمعة
+  const DEFAULT_AREAS = ['الحمام', 'الأرضيات', 'المطبخ (تنظيف عميق)', 'الشبابيك والأتربة', 'التلاجة', 'البلكونة والمدخل'];
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
   const uid = () => 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const mkMember = (name, i) => ({ id: uid(), name, color: COLORS[i % COLORS.length] });
   const newTaskId = () => Date.now() + Math.floor(Math.random() * 1000);
+  const isoOf = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
 
   /* ================= الحالة والتخزين ================= */
   function defaultState() {
@@ -80,6 +87,16 @@
     }));
     s.log = asArr(s.log);
     s.admins = asArr(s.admins).map(String);
+    const asObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+    s.supers = asArr(s.supers).map(String).filter((id) => s.members.some((m) => m.id === id));
+    s.duties = asObj(s.duties);
+    s.bank = asObj(s.bank);
+    const cut = isoOf(new Date(Date.now() - 60 * 864e5));
+    Object.keys(s.duties).forEach((k) => { if (k.slice(0, 10) < cut) delete s.duties[k]; });
+    s.wk = typeof s.wk === 'string' ? s.wk : '';
+    s.cleanDay = s.cleanDay === undefined || s.cleanDay === null ? 6 : Number(s.cleanDay);
+    s.weeklyList = asArr(s.weeklyList).map(String).filter(Boolean);
+    if (!s.weeklyList.length) s.weeklyList = DEFAULT_AREAS.slice();
     s.desserts = normMeals(s.desserts);
     s.custom = asArr(s.custom).filter((r) => r && r.id && r.name).map((r) => ({
       id: String(r.id), name: String(r.name).slice(0, 40), time: String(r.time || '—').slice(0, 20),
@@ -133,14 +150,18 @@
   const N = () => S.members.length;
   const member = (id) => S.members.find((m) => m.id === id) || null;
   const mName = (id) => (member(id) ? member(id).name : 'بدون توزيع');
+  const isSuper = (id) => S.supers.includes(id);
+  const W = () => { const w = S.members.filter((m) => !isSuper(m.id)); return w.length ? w : S.members; }; // اللي بيتكلّفوا بمهام
+  const NW = () => W().length;
+  const rot = (i) => W()[((i % NW()) + NW()) % NW()].id;
   const ov = (d, k) => {
     const v = S.overrides[d] && S.overrides[d][k];
-    const a = (typeof v === 'string' ? [v] : asArr(v)).filter((x) => member(x));
+    const a = (typeof v === 'string' ? [v] : asArr(v)).filter((x) => member(x) && !isSuper(x));
     return a.length ? a : null;
   };
-  const cooks = (d) => ov(d, 'cook') || [S.members[(S.startCook + d) % N()].id];
+  const cooks = (d) => ov(d, 'cook') || [rot(S.startCook + d)];
   const cookId = (d) => cooks(d)[0];
-  const cleans = (d) => ov(d, 'clean') || [S.members[(S.startCook + d + (N() > 1 ? 1 : 0)) % N()].id];
+  const cleans = (d) => ov(d, 'clean') || [rot(S.startCook + d + (NW() > 1 ? 1 : 0))];
   const cleanId = (d) => cleans(d)[0];
   const isProtein = (d) => S.protein.includes(d);
   const catOfDay = (d) => (isProtein(d) ? 'p' : 'n');
@@ -161,6 +182,131 @@
     if (isAdmin()) return true;
     toast(S.admins.length ? 'ده للأدمن بس 🔒' : 'اعملي نفسك أدمن الأول من تبويب الأعضاء');
     return false;
+  }
+
+
+  function requireWorker() {
+    if (!requireMe()) return false;
+    if (isSuper(me().id)) { toast('المشرفة بتتابع بس، مفيش مهام ولا نقاط عليها 👀'); return false; }
+    return true;
+  }
+
+  function addLog(entry) {
+    S.log.unshift(entry);
+    if (S.log.length > 800) {
+      S.log.splice(800).forEach((l) => { S.bank[l.by] = (Number(S.bank[l.by]) || 0) + (l.pts || 10); });
+    }
+  }
+
+  /* ================= التواريخ والمهام الأساسية (الطبخ + التنظيف) ================= */
+  function weekStartDate() {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    t.setDate(t.getDate() - todayIdx());
+    return t;
+  }
+  function dateKey(d) {
+    const x = weekStartDate();
+    x.setDate(x.getDate() + d);
+    return isoOf(x);
+  }
+  function weekNo() {
+    const x = weekStartDate();
+    return Math.floor(Date.UTC(x.getFullYear(), x.getMonth(), x.getDate()) / (7 * 864e5));
+  }
+  const isCleanDay = (d) => S.cleanDay === d;
+  const dkey = (d, k, id) => `${dateKey(d)}-${k}${id ? `-${id}` : ''}`;
+  const dutyIcon = (k) => (k === 'c' ? '🍳' : k === 'n' ? '🧹' : '🧼');
+
+  // مهام اليوم الأساسية: طبخ + (ترتيب وتنظيف، أو تنظيف أسبوعي للكل)
+  function dutiesOf(d) {
+    const out = [];
+    const day = DAYS[d];
+    cooks(d).forEach((id) => out.push({ key: dkey(d, 'c', id), k: 'c', id, d, label: `طبخ يوم ${day}`, pts: DUTY_COOK + (isProtein(d) ? DUTY_PRO : 0) }));
+    if (isCleanDay(d)) {
+      const w = W();
+      S.weeklyList.forEach((area, i) => out.push({ key: dkey(d, `a${i}`), k: 'a', id: w[(weekNo() + i) % w.length].id, d, label: `تنظيف أسبوعي: ${area}`, pts: DUTY_AREA }));
+      w.forEach((m) => out.push({ key: dkey(d, 'p', m.id), k: 'p', id: m.id, d, label: 'تنظيف أسبوعي: أوضتك وأغراضك', pts: DUTY_PERSONAL }));
+    } else {
+      cleans(d).forEach((id) => out.push({ key: dkey(d, 'n', id), k: 'n', id, d, label: `ترتيب وتنظيف يوم ${day}`, pts: DUTY_CLEAN }));
+    }
+    return out;
+  }
+
+  function findDuty(key) {
+    for (let d = 0; d < 7; d++) {
+      const it = dutiesOf(d).find((x) => x.key === key);
+      if (it) return it;
+    }
+    return null;
+  }
+
+  function dutyRow(it) {
+    const rec = S.duties[it.key];
+    const m = member(it.id);
+    const future = it.d > todayIdx();
+    const who = rec && member(rec.by) ? member(rec.by).name : (rec ? 'عضو' : '');
+    const doneBy = rec ? `<span class="doneinfo">✔ ${esc(who)} — ${when(rec.at)}</span>` : '';
+    return `<li class="task duty ${rec ? 'done' : ''}">
+      <label><input type="checkbox" data-act="toggleduty" data-key="${it.key}" ${rec ? 'checked' : ''} ${future && !rec ? 'disabled' : ''}><span>${dutyIcon(it.k)} ${esc(it.label)}</span></label>
+      <span class="who" style="--c:${m ? m.color : '#5f747c'}">${esc(m ? m.name : '—')}</span>
+      <span class="when">${it.pts}⭐</span>${doneBy}
+    </li>`;
+  }
+
+  function toggleDuty(key, checked) {
+    const it = findDuty(key);
+    if (!it) return;
+    if (checked) {
+      if (!requireWorker()) { renderAll(); return; }
+      if (it.d > todayIdx()) { toast('اليوم ده لسه ما جاش'); renderAll(); return; }
+      const m = me();
+      const at = Date.now();
+      S.duties[key] = { by: m.id, at };
+      addLog({ id: key, title: it.label, by: m.id, byName: m.name, at, assigned: it.id || null, pts: it.pts, kind: 'duty' });
+      pushNotify('مهمة اتنفّذت', `${m.name} خلّصت «${it.label}» ✔`);
+      toast(`تسجّلت باسمك يا ${m.name} ✔ (+${it.pts}⭐)`);
+    } else {
+      const rec = S.duties[key];
+      const m = me();
+      if (rec && m && rec.by !== m.id && !isAdmin()) { toast('اللي علّمتها بس أو الأدمن يقدر يشيلها'); renderAll(); return; }
+      delete S.duties[key];
+      const i = S.log.findIndex((l) => l.id === key);
+      if (i >= 0) S.log.splice(i, 1);
+    }
+    save();
+    renderAll();
+  }
+
+  const dutyIconOf = (k) => dutyIcon(k);
+
+  // اللي على الشخص النهارده (للتذكير وللمتابعة)
+  function agendaOf(id) {
+    const t = todayIdx();
+    const parts = dutiesOf(t).filter((x) => x.id === id && !S.duties[x.key]).map((x) => `${dutyIconOf(x.k)} ${x.label} (+${x.pts}⭐)`);
+    const mine = S.tasks.filter((x) => x.who === id && !x.done && (x.day === t || x.day < 0));
+    if (mine.length) parts.push(`📝 ${mine.length} مهام: ${mine.slice(0, 3).map((x) => x.title).join('، ')}`);
+    return parts;
+  }
+
+  function watchHtml() {
+    const m = me();
+    if (!m || !isSuper(m.id)) return '';
+    const t = todayIdx();
+    const since = weekStartDate().getTime();
+    const rows = W().map((w) => {
+      const du = dutiesOf(t).filter((x) => x.id === w.id);
+      const ts = S.tasks.filter((x) => x.who === w.id && (x.day < 0 || x.day === t));
+      const total = du.length + ts.length;
+      const done = du.filter((x) => S.duties[x.key]).length + ts.filter((x) => x.done).length;
+      const pend = [...du.filter((x) => !S.duties[x.key]).map((x) => x.label), ...ts.filter((x) => !x.done).map((x) => x.title)];
+      const pts = S.log.filter((l) => l.by === w.id && l.at >= since).reduce((a, l) => a + (l.pts || 10), 0);
+      return `<li style="--c:${w.color}"><div class="wrow"><b class="mc">${esc(w.name)}</b><span>${done}/${total}</span><span class="pts">${pts}⭐</span></div>
+        <div class="meter"><i style="width:${total ? Math.round((done / total) * 100) : 100}%"></i></div>
+        <small>${pend.length ? `متبقي: ${esc(pend.slice(0, 3).join('، '))}${pend.length > 3 ? ` +${pend.length - 3}` : ''}` : 'خلّصت كل حاجة ✔'}</small></li>`;
+    }).join('');
+    return `<section class="panel watch"><h3 class="sub" style="margin-top:0">👀 متابعة النهارده</h3><ul>${rows}</ul>
+      <p class="help">انتي مشرفة: بتتابعي بس، ومفيش عليكي مهام ولا نقاط.</p></section>`;
   }
 
   function when(ts) {
@@ -231,7 +377,7 @@
       if (cooks(d).includes(id)) { cook++; if (isProtein(d)) cookPro++; }
     }
     return {
-      open: S.tasks.filter((t) => t.who === id && !t.done).length,
+      open: S.tasks.filter((t) => t.who === id && !t.done).length + dutiesOf(todayIdx()).filter((x) => x.id === id && !S.duties[x.key]).length,
       doneWeek: S.log.filter((l) => l.by === id && l.at >= since).length,
       cook, cookPro
     };
@@ -291,7 +437,7 @@
         ${feedHtml(S.log.slice(0, 15))}
       </section>
 
-      ${adminPanel()}${notePanel()}
+      ${adminPanel()}${supervisorPanel()}${notePanel()}
       <form class="panel" id="memberForm" autocomplete="off">
         <h3 class="sub" style="margin-top:0">إضافة عضو جديد</h3>
         <div class="inline-form">
@@ -352,8 +498,9 @@
       if (t.doneBy === id) { t.doneByName = t.doneByName || m.name; }
     });
     S.admins = S.admins.filter((x) => x !== id);
+    S.supers = S.supers.filter((x) => x !== id);
     S.members = S.members.filter((x) => x.id !== id);
-    S.startCook %= N();
+    S.startCook %= NW();
     if (localStorage.getItem(ME_KEY) === id) localStorage.removeItem(ME_KEY);
     viewMember = null;
     save();
@@ -388,8 +535,15 @@
       </header>
       <dl>
         <div><dt>الطبخ</dt><dd>${cooks(d).map((x) => mcSpan(x)).join('، ')}</dd></div>
-        <div><dt>الترتيب والتنظيف</dt><dd>${cleans(d).map((x) => mcSpan(x)).join('، ')}</dd></div>
+        <div><dt>الترتيب والتنظيف</dt><dd>${isCleanDay(d) ? '🧼 الكل (تنظيف أسبوعي)' : cleans(d).map((x) => mcSpan(x)).join('، ')}</dd></div>
       </dl>
+      ${(() => {
+        const du = dutiesOf(d);
+        const dn = du.filter((x) => S.duties[x.key]).length;
+        const key = `duty${d}`;
+        const open = openDetails[key] === undefined ? d === today : openDetails[key];
+        return `<details class="dutybox" data-key="${key}" ${open ? 'open' : ''}><summary>المهام الأساسية (${dn}/${du.length})${isCleanDay(d) ? ' 🧼' : ''}</summary><ul class="tasks mini">${du.map(dutyRow).join('')}</ul></details>`;
+      })()}
       <div class="meal">
         ${r ? `<div class="mealline">
           <button class="mealname" data-act="viewrecipe" data-id="${r.id}" data-d="${d}">${esc(r.name)}<small>${r.time}</small></button>
@@ -422,7 +576,19 @@
           <button class="btn soft" data-act="clearmeals">مسح كل الوصفات</button>
         </div>
         <p class="muted">الطبخ بيدور على ${N()} أعضاء يوم بعد يوم، ومن بعد اللي بتطبخ بتيجي اللي بترتب وتنظف. الأعضاء بيتضافوا ويتحذفوا من تبويب «الأعضاء». اضغطي على نوع اليوم (🍗 / 🥗) علشان تغيّريه.</p>
+        <label class="field">يوم التنظيف الأسبوعي للكل
+          <select data-cleanday>
+            <option value="-1" ${S.cleanDay === -1 ? 'selected' : ''}>من غير</option>
+            ${DAYS.map((n, i) => `<option value="${i}" ${S.cleanDay === i ? 'selected' : ''}>${n}</option>`).join('')}
+          </select>
+        </label>
+        <label class="field">مناطق التنظيف الأسبوعي (كل سطر منطقة)
+          <textarea id="weeklyList" rows="5">${esc(S.weeklyList.join('\n'))}</textarea>
+        </label>
+        <button class="btn alt" data-act="saveweekly">حفظ قائمة التنظيف</button>
+        <p class="muted">في يوم التنظيف الأسبوعي كل واحدة (غير المشرفة) ليها أوضتها، والمناطق بتتوزع عليهم بالدور، وكلها بنقاط.</p>
       </details>
+      ${watchHtml()}
       <div class="days">${DAYS.map((_, d) => dayCard(d, today)).join('')}</div>`;
     renderHeader();
   }
@@ -431,7 +597,17 @@
   function openCount(id) { return S.tasks.filter((t) => t.who === id && !t.done).length; }
 
   function pickLeastLoaded() {
-    return S.members.reduce((best, m) => (openCount(m.id) < openCount(best.id) ? m : best), S.members[0]).id;
+    return W().reduce((best, m) => (openCount(m.id) < openCount(best.id) ? m : best), W()[0]).id;
+  }
+
+  function coreHtml() {
+    const t = todayIdx();
+    let items = dutiesOf(t);
+    if (taskFilter === 'none') items = [];
+    else if (taskFilter === 'done') items = items.filter((x) => S.duties[x.key]);
+    else if (taskFilter !== 'all') items = items.filter((x) => x.id === taskFilter);
+    if (!items.length) return '';
+    return `<h3 class="sub" style="margin-top:0">🍳 الأساسية النهارده${isCleanDay(t) ? ' — يوم التنظيف الأسبوعي 🧼' : ''}</h3><ul class="tasks">${items.map(dutyRow).join('')}</ul>`;
   }
 
   function renderTasks() {
@@ -445,11 +621,13 @@
 
     $('#tab-tasks').innerHTML = `
       <div class="counts">
-        ${S.members.map((m) => {
+        ${W().map((m) => {
           const st = stats(m.id);
           return `<div class="count" style="--c:${m.color}"><span class="mc">${esc(m.name)}</span><b>${st.open} متبقية</b><span class="muted">${st.doneWeek} خلّصتها آخر ٧ أيام</span></div>`;
         }).join('')}
       </div>
+
+      ${coreHtml()}
 
       <form class="panel addform" id="taskForm" autocomplete="off">
         <label class="field">مهمة جديدة<input type="text" id="taskTitle" placeholder="مثال: تنظيف التلاجة" maxlength="60" required></label>
@@ -457,7 +635,7 @@
           <label class="field">مين تعملها
             <select id="taskWho">
               <option value="auto">توزيع تلقائي</option>
-              ${S.members.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}
+              ${W().map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}
             </select>
           </label>
           <label class="field">اليوم
@@ -479,7 +657,7 @@
 
       <div class="chips">
         ${chip('all', 'الكل')}
-        ${S.members.map((m) => chip(m.id, `<i class="dot" style="--c:${m.color}"></i>${esc(m.name)}`)).join('')}
+        ${W().map((m) => chip(m.id, `<i class="dot" style="--c:${m.color}"></i>${esc(m.name)}`)).join('')}
         ${chip('none', 'بدون توزيع')}${chip('done', '✔ المنجزة')}
       </div>
 
@@ -499,6 +677,7 @@
     save();
     renderAll();
     toast(`اتضافت المهمة لـ ${mName(who)}`);
+    pushNotify('📝 مهمة جديدة', `${title.trim()} — على ${mName(who)}`, who);
   }
 
   function distribute(all) {
@@ -506,9 +685,9 @@
     const targets = S.tasks.filter((t) => !t.done && (all || !t.who));
     if (!targets.length) { toast('مفيش مهام محتاجة توزيع'); return; }
     const load = {};
-    S.members.forEach((m) => { load[m.id] = all ? 0 : openCount(m.id); });
+    W().forEach((m) => { load[m.id] = all ? 0 : openCount(m.id); });
     targets.forEach((t) => {
-      const best = S.members.reduce((b, m) => (load[m.id] < load[b.id] ? m : b), S.members[0]);
+      const best = W().reduce((b, m) => (load[m.id] < load[b.id] ? m : b), W()[0]);
       t.who = best.id;
       load[best.id]++;
     });
@@ -521,15 +700,14 @@
     const t = S.tasks.find((x) => x.id === id);
     if (!t) return;
     if (checked) {
-      if (!requireMe()) { renderTasks(); return; }
+      if (!requireWorker()) { renderTasks(); return; }
       const m = me();
       t.done = true;
       t.doneBy = m.id;
       t.doneByName = m.name;
       t.doneAt = Date.now();
-      S.log.unshift({ id: t.id, title: t.title, by: m.id, byName: m.name, at: t.doneAt, assigned: t.who || null, pts: t.pts || 10 });
-      S.log = S.log.slice(0, 300);
-      if (!S.tasks.some((x) => x.who === m.id && !x.done)) S.log[0].all = true;
+      addLog({ id: t.id, title: t.title, by: m.id, byName: m.name, at: t.doneAt, assigned: t.who || null, pts: t.pts || 10 });
+      if (!S.tasks.some((x) => x.who === m.id && !x.done) && !dutiesOf(todayIdx()).some((x) => x.id === m.id && !S.duties[x.key])) S.log[0].all = true;
       pushNotify(S.log[0].all ? 'برافو 🎉' : 'مهمة اتنفّذت', `${m.name} ${S.log[0].all ? 'خلّصت كل مهامها 🎉' : `خلّصت «${t.title}» ✔`}`);
       toast(S.log[0].all ? `برافو يا ${m.name}! خلّصتي كل مهامك 🎉` : `تسجّلت باسمك يا ${m.name} ✔ (+${t.pts || 10}⭐)`);
     } else {
@@ -874,9 +1052,9 @@
 
   function renderBoard() {
     const since = boardRange === 'week' ? Date.now() - WEEK_MS : 0;
-    const rows = S.members.map((m) => {
+    const rows = W().map((m) => {
       const ls = S.log.filter((l) => l.by === m.id && l.at >= since);
-      return { m, n: ls.length, pts: ls.reduce((a, l) => a + (l.pts || 10), 0) };
+      return { m, n: ls.length, pts: ls.reduce((a, l) => a + (l.pts || 10), 0) + (boardRange === 'all' ? (Number(S.bank[m.id]) || 0) : 0) };
     }).sort((a, b) => b.pts - a.pts || b.n - a.n);
     const medal = ['🥇', '🥈', '🥉'];
     const max = Math.max(1, rows[0].pts);
@@ -889,7 +1067,7 @@
   }
 
   function daySheet(d) {
-    const chk = (k, cur) => S.members.map((m) => `<label class="chip"><input type="checkbox" name="ov-${k}" value="${m.id}" ${cur.includes(m.id) ? 'checked' : ''}> ${esc(m.name)}</label>`).join('');
+    const chk = (k, cur) => W().map((m) => `<label class="chip"><input type="checkbox" name="ov-${k}" value="${m.id}" ${cur.includes(m.id) ? 'checked' : ''}> ${esc(m.name)}</label>`).join('');
     const opts = (cur) => S.members.map((m) => `<option value="${m.id}" ${m.id === cur ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
     openSheet(`<h2>مسؤولات ${DAYS[d]}</h2>
       <h4>الطبخ (تقدري تختاري أكتر من واحدة)</h4><div class="chips">${chk('cook', cooks(d))}</div>
@@ -909,16 +1087,87 @@
     }).join('')}</div><p class="help">${isAdmin() ? 'اضغطي على اسم لإضافته أو إزالته كأدمن.' : 'الأدمن بس يقدر يضيف أدمن تاني.'}</p></section>`;
   }
 
+  function supervisorPanel() {
+    const head = '<h3 class="sub" style="margin-top:0">👀 المشرفة (الأم)</h3>';
+    return `<section class="panel">${head}<div class="chips">${S.members.map((x) => {
+      const a = isSuper(x.id);
+      return `<button class="chip ${a ? 'on' : ''}" data-act="togglesuper" data-id="${x.id}">${a ? '👀 ' : ''}${esc(x.name)}</button>`;
+    }).join('')}</div><p class="help">المشرفة بتشوف كل المهام والإنجازات ولوحة متابعة، لكن مفيش عليها مهام ولا بتطبخ ولا بتاخد نقاط. تغييرها من الأدمن.</p></section>`;
+  }
+
+  let chan = null; // حالة قنوات الإشعارات من الـ Worker: { push, tg, bot }
+
   function notePanel() {
-    const p = 'Notification' in window ? Notification.permission : 'unsupported';
-    const body = p === 'granted' ? '<p class="help">مفعّلة ✔ هتوصلك تذكيرات مهام اليوم وإشعار لما حد يخلّص مهامه.</p>'
-      : p === 'unsupported' ? '<p class="help">المتصفح ده مش بيدعم الإشعارات. على الآيفون ثبّتي التطبيق على الشاشة الرئيسية الأول.</p>'
-      : '<button class="btn alt" data-act="notifon">تفعيل الإشعارات</button>';
-    return `<section class="panel"><h3 class="sub" style="margin-top:0">🔔 الإشعارات</h3>${body}${wkUrl() ? '<p class="help">🔔 إشعارات التطبيق المقفول مفعّلة على الجهاز ده ✔</p>' : `<label class="field" style="margin-top:10px">رابط الـ Worker (للإشعارات والتطبيق مقفول)<input type="text" id="wkUrl" dir="ltr" placeholder="https://kitchen-push.xxx.workers.dev"></label><button class="btn alt" data-act="pushon" style="margin-top:8px">تفعيل إشعارات التطبيق المقفول</button>`}</section>`;
+    const head = '<h3 class="sub" style="margin-top:0">🔔 الإشعارات</h3>';
+    if (!S.wk) {
+      return `<section class="panel">${head}
+        <p class="help">علشان الإشعارات توصل والتطبيق مقفول (من أي متصفح أو من تيليجرام) محتاجين Worker على Cloudflare. الكود جاهز في ملف <b>worker.js</b> وخطواته في README. بعد ما تنشريه حطي رابطه هنا مرة واحدة وهيوصل لكل الأجهزة.</p>
+        <label class="field">رابط الـ Worker<input type="text" id="wkUrl" dir="ltr" placeholder="https://kitchen-push.xxx.workers.dev"></label>
+        <button class="btn alt" data-act="savewk" style="margin-top:8px">حفظ للكل</button></section>`;
+    }
+    const pushOn = !!localStorage.getItem(PUSH_KEY);
+    const tgOn = !!(chan && chan.tg);
+    const canTg = !chan || chan.bot !== false;
+    return `<section class="panel">${head}
+      <div class="chan"><div><b>🌐 المتصفح</b><small>${pushOn ? 'مفعّل على الجهاز ده ✔' : 'مش مفعّل على الجهاز ده'}</small></div>
+        ${pushOn ? '' : '<button class="btn alt" data-act="pushon">تفعيل</button>'}</div>
+      <div class="chan"><div><b>✈️ تيليجرام</b><small>${tgOn ? 'مربوط ✔ (بيوصلك على أي جهاز)' : (canTg ? 'مش مربوط' : 'البوت مش متظبط في الـ Worker')}</small></div>
+        ${tgOn ? '<button class="btn soft" data-act="tgunlink">فك الربط</button>' : '<button class="btn alt" data-act="tglink">ربط</button>'}</div>
+      <div class="row"><button class="btn soft" data-act="pushtest">جرّبي إشعار</button>
+        ${isAdmin() ? '<button class="btn soft" data-act="clearwk">تغيير الـ Worker</button>' : ''}</div>
+      <p class="help">بيوصلك تذكير الصبح والمسا بمهامك، وإشعار لما حد يديكي مهمة جديدة أو يخلّص مهمة. ${me() && isSuper(me().id) ? 'وبما إنك مشرفة هيجيلك ملخص آخر اليوم.' : ''} تقدرين تفعّلي القناتين مع بعض.</p></section>`;
+  }
+
+  async function refreshChan() {
+    const c = getSync();
+    const m = me();
+    if (!S.wk || !c || !m) { chan = null; return; }
+    try {
+      const r = await fetch(`${S.wk}/status?room=${encodeURIComponent(c.room)}&me=${encodeURIComponent(m.id)}`);
+      if (!r.ok) throw new Error(r.status);
+      chan = await r.json();
+      if (!isTyping()) renderMembers();
+    } catch (e) { /* تجاهل */ }
+  }
+
+  async function tgLink() {
+    const c = getSync();
+    const m = me();
+    if (!S.wk || !c || !m) { toast('فعّلي المزامنة واختاري اسمك الأول'); return; }
+    try {
+      const r = await fetch(`${S.wk}/link`, { method: 'POST', body: JSON.stringify({ room: c.room, me: m.id }) });
+      const j = await r.json();
+      if (!r.ok || !j.bot) throw new Error(j.error || 'البوت مش متظبط في الـ Worker');
+      toast('اضغطي Start في تيليجرام وارجعي هنا');
+      window.location.href = `https://t.me/${j.bot}?start=${j.code}`;
+      setTimeout(refreshChan, 8000);
+    } catch (e) { alert(`تعذّر الربط\n${e && e.message ? e.message : e}`); }
+  }
+
+  async function tgUnlink() {
+    const c = getSync();
+    const m = me();
+    if (!S.wk || !c || !m) return;
+    try {
+      await fetch(`${S.wk}/unlink`, { method: 'POST', body: JSON.stringify({ room: c.room, me: m.id }) });
+      toast('اتفك الربط');
+      refreshChan();
+    } catch (e) { toast('تعذّر فك الربط'); }
+  }
+
+  async function pushTest() {
+    const c = getSync();
+    const m = me();
+    if (!S.wk || !c || !m) { toast('فعّلي المزامنة واختاري اسمك الأول'); return; }
+    try {
+      const r = await fetch(`${S.wk}/notify`, { method: 'POST', body: JSON.stringify({ room: c.room, from: '', to: m.id, title: '🔔 تجربة', body: `الإشعارات شغالة يا ${m.name} ✔` }) });
+      const j = await r.json();
+      toast(j.sent ? `اتبعت (${j.sent})، لو ماوصلش اتأكدي من القنوات` : 'مفيش قناة مفعّلة ليكي لسه');
+    } catch (e) { toast('تعذّر الوصول للـ Worker'); }
   }
 
   const PUSH_KEY = 'kitchen-push-v1';
-  const wkUrl = () => localStorage.getItem(PUSH_KEY) || '';
+  const wkUrl = () => S.wk || localStorage.getItem(PUSH_KEY) || '';
   const u8 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 
   async function enablePush(url) {
@@ -928,7 +1177,7 @@
         alert('المتصفح ده مش بيدعم الإشعارات.\nجرّبي كروم أو فايرفوكس أو إيدج أو سامسونج إنترنت، ومتفتحيش اللينك من جوه واتساب أو تطبيق تاني.');
         return;
       }
-      url = String(url).trim().replace(/\/+$/, '');
+      url = String(url || S.wk).trim().replace(/\/+$/, '');
       if (!/^https:\/\/[^\s/]+/i.test(url)) { toast('الرابط لازم يبدأ بـ https://'); return; }
       if (!getSync()) { toast('فعّلي المزامنة الأول'); return; }
       if ((await Notification.requestPermission()) !== 'granted') { toast('لازم توافقي على الإشعارات'); return; }
@@ -943,16 +1192,18 @@
       const r = await fetch(`${url}/subscribe`, { method: 'POST', body: JSON.stringify({ room: getSync().room, me: me() ? me().id : '', sub: sub.toJSON() }) });
       if (!r.ok) throw new Error(r.status);
       localStorage.setItem(PUSH_KEY, url);
+      if (!S.wk) { S.wk = url; save(); }
+      refreshChan();
       renderMembers();
       toast('اتفعّلت الإشعارات حتى والتطبيق مقفول 🔔');
     } catch (e) { alert(`تعذّر التفعيل\nالخطوة: ${step}\n${e && e.name ? e.name + ': ' : ''}${e && e.message ? e.message : e}`); }
   }
 
-  function pushNotify(title, body) {
+  function pushNotify(title, body, to) {
     const c = getSync();
     const m = me();
     if (!c || !wkUrl() || !m) return;
-    fetch(`${wkUrl()}/notify`, { method: 'POST', body: JSON.stringify({ room: c.room, from: m.id, title, body }) }).catch(() => {});
+    fetch(`${wkUrl()}/notify`, { method: 'POST', body: JSON.stringify({ room: c.room, from: m.id, to: to || '', title, body }) }).catch(() => {});
   }
 
   function notify(title, body) {
@@ -965,18 +1216,14 @@
 
   function dailyReminder() {
     const m = me();
-    if (!m || new Date().getHours() < 8) return;
+    if (!m || isSuper(m.id) || new Date().getHours() < 8) return;
+    if (localStorage.getItem(PUSH_KEY) || (chan && chan.tg)) return; // الـ Worker بيبعت التذكيرات
     const key = new Date().toDateString() + m.id;
     if (localStorage.getItem(REMIND_KEY) === key) return;
-    const t = todayIdx();
-    const mine = S.tasks.filter((x) => x.who === m.id && !x.done && (x.day === t || x.day < 0));
-    const parts = [];
-    if (cooks(t).includes(m.id)) parts.push('النهارده دورك في الطبخ 🍳');
-    if (cleans(t).includes(m.id)) parts.push('ودورك في الترتيب والتنظيف 🧹');
-    if (mine.length) parts.push(`عندك ${mine.length} مهام: ${mine.slice(0, 3).map((x) => x.title).join('، ')}`);
+    const parts = agendaOf(m.id);
     if (!parts.length) return;
     localStorage.setItem(REMIND_KEY, key);
-    notify(`مهام ${DAYS[t]}`, parts.join(' — '));
+    notify(`مهام ${DAYS[todayIdx()]}`, parts.join(' — '));
   }
 
   /* ================= التحكم والأحداث ================= */
@@ -992,6 +1239,7 @@
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.id === `tab-${name}`));
     document.querySelectorAll('.bar button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
     window.scrollTo(0, 0);
+    if (name === 'members') refreshChan();
   }
 
   document.addEventListener('click', (e) => {
@@ -1044,7 +1292,7 @@
 
       case 'preset': setPreset(Number(el.dataset.n)); break;
       case 'swapweek':
-        S.startCook = (S.startCook + 7) % N();
+        S.startCook = (S.startCook + 7) % NW();
         save(); renderSchedule();
         toast(`السبت الجاي الطبخ مع ${mName(cookId(0))}`);
         break;
@@ -1079,8 +1327,9 @@
         if (!needAdmin()) break;
         const t = S.tasks.find((x) => x.id === Number(id));
         if (t) {
-          const i = S.members.findIndex((m) => m.id === t.who);
-          t.who = S.members[(i + 1) % N()].id;
+          const ws = W();
+          const i = ws.findIndex((m) => m.id === t.who);
+          t.who = ws[(i + 1) % ws.length].id;
           save(); renderAll();
         }
         break;
@@ -1122,7 +1371,41 @@
         } else S.admins.push(id);
         save(); renderAll();
         break;
-      case 'pushon': enablePush($('#wkUrl').value); break;
+      case 'pushon': enablePush(S.wk); break;
+      case 'savewk': {
+        if (!needAdmin()) break;
+        const u = String($('#wkUrl').value).trim().replace(/\/+$/, '');
+        if (!/^https:\/\/[^\s/]+/i.test(u)) { toast('الرابط لازم يبدأ بـ https://'); break; }
+        S.wk = u; save(); renderAll(); toast('اتحفظ رابط الـ Worker لكل الأجهزة'); refreshChan();
+        break;
+      }
+      case 'clearwk':
+        if (!needAdmin() || !confirm('تغيير رابط الـ Worker؟ لازم كل جهاز يفعّل الإشعارات تاني.')) break;
+        S.wk = ''; localStorage.removeItem(PUSH_KEY); chan = null; save(); renderAll();
+        break;
+      case 'tglink': tgLink(); break;
+      case 'tgunlink': tgUnlink(); break;
+      case 'pushtest': pushTest(); break;
+      case 'toggleduty': toggleDuty(el.dataset.key, el.checked); break;
+      case 'togglesuper':
+        if (!needAdmin()) break;
+        if (isSuper(id)) {
+          S.supers = S.supers.filter((x) => x !== id);
+        } else {
+          if (!S.members.some((m) => m.id !== id && !isSuper(m.id))) { toast('لازم يفضل عضو واحد على الأقل بيتكلّف بمهام'); break; }
+          S.supers.push(id);
+          S.tasks.forEach((t) => { if (t.who === id) t.who = null; });
+          toast('بقت مشرفة 👀 والمهام اللي كانت معاها بقت من غير توزيع');
+        }
+        save(); renderAll();
+        break;
+      case 'saveweekly': {
+        if (!needAdmin()) break;
+        const list = String($('#weeklyList').value).split('\n').map((x) => x.trim().slice(0, 40)).filter(Boolean).slice(0, 12);
+        S.weeklyList = list.length ? list : DEFAULT_AREAS.slice();
+        save(); renderAll(); toast('اتحفظت قائمة التنظيف');
+        break;
+      }
       case 'notifon': Notification.requestPermission().then(() => { renderMembers(); dailyReminder(); }); break;
       case 'pickdessert': dessertSheet(d); break;
       case 'cleardessert': delete S.desserts[d]; save(); renderSchedule(); break;
@@ -1139,6 +1422,14 @@
   });
 
   document.addEventListener('change', (e) => {
+    const cd = e.target.closest('[data-cleanday]');
+    if (cd) {
+      if (!needAdmin()) { renderSchedule(); return; }
+      S.cleanDay = Number(cd.value);
+      save(); renderAll();
+      toast(S.cleanDay < 0 ? 'اتلغى يوم التنظيف الأسبوعي' : `يوم التنظيف الأسبوعي: ${DAYS[S.cleanDay]}`);
+      return;
+    }
     const input = e.target.closest('[data-mname]');
     if (!input) return;
     const m = member(input.dataset.mname);
@@ -1187,8 +1478,10 @@
   });
 
   /* ================= تشغيل ================= */
+  if (!S.wk && localStorage.getItem(PUSH_KEY)) { S.wk = localStorage.getItem(PUSH_KEY); save(); }
   renderAll();
   renderRecipes();
+  refreshChan();
   setInterval(dailyReminder, 60000);
   setTimeout(dailyReminder, 3000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) dailyReminder(); });

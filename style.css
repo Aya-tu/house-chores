@@ -575,3 +575,43 @@ body { padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
 .dessert { margin-top: 10px; }
 .dessert .btn { width: 100%; }
 textarea { width: 100%; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; font: inherit; }
+
+/* ---------- المهام الأساسية والمتابعة والقنوات ---------- */
+textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  color: inherit;
+  resize: vertical;
+}
+
+.dutybox { margin: 10px 0 0; }
+.dutybox > summary { font-weight: 800; cursor: pointer; padding: 6px 0; }
+.task.duty { border-inline-start: 5px solid var(--saffron); }
+.task .who { cursor: default; }
+
+.watch ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.watch li {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-inline-start: 5px solid var(--c);
+  border-radius: 6px 12px 12px 6px;
+  padding: 8px 12px;
+}
+.wrow { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.meter { height: 8px; border-radius: 6px; background: var(--bg); overflow: hidden; margin: 6px 0; }
+.meter i { display: block; height: 100%; background: var(--c); border-radius: 6px; }
+.watch small { color: var(--muted); }
+
+.chan {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.chan small { display: block; color: var(--muted); }

@@ -1,5 +1,5 @@
 // خدمة التخزين المؤقت: التطبيق يفتح حتى من غير نت، ويجيب آخر نسخة لما النت يرجع
-const CACHE = 'kitchen-week-v3';
+const CACHE = 'kitchen-week-v4';
 const ASSETS = [
   './', 'index.html', 'style.css', 'script.js', 'recipes.js',
   'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'
@@ -29,4 +29,9 @@ self.addEventListener('fetch', (e) => {
       })
       .catch(() => caches.match(req).then((r) => r || caches.match('index.html')))
   );
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window' }).then((cs) => (cs[0] ? cs[0].focus() : self.clients.openWindow('./'))));
 });

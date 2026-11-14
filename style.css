@@ -544,3 +544,28 @@ input[type="text"], input[type="search"], select {
 }
 
 .bar button { font-size: 0.92rem; }
+
+/* ---------- واجهة جديدة ---------- */
+:root { --bg: #f6f1e9; --line: #e6dccb; --card: #fffdf9; --navy: #1b3a4b; --navy-2: #244b60; }
+.top { background: linear-gradient(135deg, var(--navy), var(--teal)); border-bottom: 0; border-radius: 0 0 28px 28px; padding-bottom: 24px; box-shadow: 0 6px 18px rgba(27, 58, 75, .25); }
+.top h1 { font-size: 1.55rem; }
+.top p { background: rgba(255, 255, 255, .14); border-radius: 12px; padding: 6px 12px; margin-top: 10px; }
+.day, .panel, .count, .task, .rcard { box-shadow: 0 2px 8px rgba(60, 45, 20, .06); border-radius: 18px; }
+.day { border-inline-start-width: 0; border-top: 6px solid var(--leaf); }
+.day.pro { border-top-color: var(--hibiscus); }
+.day.today { box-shadow: 0 0 0 3px var(--saffron), 0 6px 16px rgba(242, 177, 52, .3); }
+.bar { inset-inline: 10px; bottom: calc(8px + env(safe-area-inset-bottom)); border-radius: 22px; padding: 4px; background: var(--navy); box-shadow: 0 8px 22px rgba(0, 0, 0, .3); }
+.bar button { display: flex; flex-direction: column; align-items: center; gap: 0; padding: 6px 2px; font-size: .72rem; border: 0; border-radius: 16px; }
+.bar button i { font-style: normal; font-size: 1.25rem; line-height: 1.3; }
+.bar button.active { background: var(--saffron); color: var(--navy); }
+body { padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
+.toast { bottom: calc(96px + env(safe-area-inset-bottom)); }
+.board { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 10px; }
+.board li { display: flex; align-items: center; gap: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 12px 14px; box-shadow: 0 2px 8px rgba(60, 45, 20, .06); }
+.board li:first-child { background: linear-gradient(135deg, #fff6dc, #fffdf9); border-color: var(--saffron); }
+.board .rank { font-size: 1.7rem; min-width: 36px; text-align: center; font-weight: 800; }
+.board .bw { flex: 1; position: relative; }
+.board .bw small { margin-inline-start: 8px; color: var(--muted); }
+.board .bw i { display: block; height: 8px; border-radius: 8px; background: var(--c); margin-top: 6px; min-width: 6px; }
+.board .pts { font-weight: 800; font-size: 1.2rem; color: var(--c); }
+.chip:disabled { opacity: 1; }

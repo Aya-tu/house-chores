@@ -9,7 +9,7 @@
   const ME_KEY = 'kitchen-me-v1';
   const SYNC_KEY = 'kitchen-sync-v1';
   const COLORS = ['#1f7a8c', '#b5651d', '#7a4fa3', '#2e8b57', '#c2415a', '#3b5bdb', '#8a6d00', '#0f766e'];
-  const SHARED = ['members', 'startCook', 'protein', 'meals', 'tasks', 'log'];
+  const SHARED = ['members', 'startCook', 'protein', 'meals', 'tasks', 'log', 'admins', 'overrides'];
   const MAX_MEMBERS = 12;
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -77,6 +77,8 @@
       done: !!t.done
     }));
     s.log = asArr(s.log);
+    s.admins = asArr(s.admins).map(String);
+    s.overrides = (s.overrides && typeof s.overrides === 'object' && !Array.isArray(s.overrides)) ? s.overrides : {};
     s.protein = asArr(s.protein).map(Number);
     s.meals = normMeals(s.meals);
     s.startCook = (Number(s.startCook) || 0) % s.members.length;
@@ -123,8 +125,9 @@
   const N = () => S.members.length;
   const member = (id) => S.members.find((m) => m.id === id) || null;
   const mName = (id) => (member(id) ? member(id).name : 'بدون توزيع');
-  const cookId = (d) => S.members[(S.startCook + d) % N()].id;
-  const cleanId = (d) => S.members[(S.startCook + d + (N() > 1 ? 1 : 0)) % N()].id;
+  const ov = (d, k) => (S.overrides[d] && member(S.overrides[d][k]) ? S.overrides[d][k] : null);
+  const cookId = (d) => ov(d, 'cook') || S.members[(S.startCook + d) % N()].id;
+  const cleanId = (d) => ov(d, 'clean') || S.members[(S.startCook + d + (N() > 1 ? 1 : 0)) % N()].id;
   const isProtein = (d) => S.protein.includes(d);
   const catOfDay = (d) => (isProtein(d) ? 'p' : 'n');
   const recipeById = (id) => RECIPES.find((r) => r.id === id);
@@ -137,6 +140,13 @@
   function me() {
     const id = localStorage.getItem(ME_KEY);
     return id ? member(id) : null;
+  }
+
+  const isAdmin = () => { const m = me(); return !!m && S.admins.includes(m.id); };
+  function needAdmin() {
+    if (isAdmin()) return true;
+    toast(S.admins.length ? 'ده للأدمن بس 🔒' : 'اعملي نفسك أدمن الأول من تبويب الأعضاء');
+    return false;
   }
 
   function when(ts) {
@@ -267,6 +277,7 @@
         ${feedHtml(S.log.slice(0, 15))}
       </section>
 
+      ${adminPanel()}${notePanel()}
       <form class="panel" id="memberForm" autocomplete="off">
         <h3 class="sub" style="margin-top:0">إضافة عضو جديد</h3>
         <div class="inline-form">
@@ -326,6 +337,7 @@
       if (t.who === id) t.who = null;
       if (t.doneBy === id) { t.doneByName = t.doneByName || m.name; }
     });
+    S.admins = S.admins.filter((x) => x !== id);
     S.members = S.members.filter((x) => x.id !== id);
     S.startCook %= N();
     if (localStorage.getItem(ME_KEY) === id) localStorage.removeItem(ME_KEY);
@@ -344,7 +356,7 @@
     return `<li class="task ${t.done ? 'done' : ''}">
       <label><input type="checkbox" data-act="toggletask" data-id="${t.id}" ${t.done ? 'checked' : ''}><span>${esc(t.title)}</span></label>
       <button class="who ${m ? '' : 'none'}" ${m ? `style="--c:${m.color}"` : ''} data-act="cycletask" data-id="${t.id}" title="غيّري المسؤولة">${esc(m ? m.name : 'بدون توزيع')}</button>
-      <span class="when">${t.day < 0 ? 'أي يوم' : DAYS[t.day]}</span>
+      <span class="when">${t.day < 0 ? 'أي يوم' : DAYS[t.day]} · ${t.pts || 10}⭐</span>
       <button class="x" data-act="deltask" data-id="${t.id}" aria-label="حذف المهمة">✕</button>
       ${doneBy}
     </li>`;
@@ -357,7 +369,7 @@
     return `<article class="day ${pro ? 'pro' : 'veg'} ${d === today ? 'today' : ''}">
       <header>
         <h3>${DAYS[d]}${d === today ? '<span class="now">اليوم</span>' : ''}</h3>
-        <button class="kind" data-act="toggleprotein" data-d="${d}">${pro ? '🍗 بروتين' : '🥗 بدون بروتين'}</button>
+        <button class="ghost" data-act="editday" data-d="${d}" aria-label="تعديل المسؤولة">✏️</button><button class="kind" data-act="toggleprotein" data-d="${d}">${pro ? '🍗 بروتين' : '🥗 بدون بروتين'}</button>
       </header>
       <dl>
         <div><dt>الطبخ</dt><dd>${mcSpan(cookId(d))}</dd></div>
@@ -437,6 +449,7 @@
             </select>
           </label>
         </div>
+        <label class="field">النقاط<select id="taskPts"><option>5</option><option selected>10</option><option>20</option><option>30</option></select></label>
         <button class="btn" type="submit">إضافة المهمة</button>
       </form>
 
@@ -462,14 +475,16 @@
   }
 
   function addTask(title, whoVal, day) {
+    if (!needAdmin()) return;
     const who = whoVal === 'auto' ? pickLeastLoaded() : whoVal;
-    S.tasks.push({ id: newTaskId(), title: title.trim(), who, day: Number(day), done: false });
+    S.tasks.push({ id: newTaskId(), title: title.trim(), who, day: Number(day), done: false, pts: Number(($('#taskPts') || {}).value) || 10 });
     save();
     renderAll();
     toast(`اتضافت المهمة لـ ${mName(who)}`);
   }
 
   function distribute(all) {
+    if (!needAdmin()) return;
     const targets = S.tasks.filter((t) => !t.done && (all || !t.who));
     if (!targets.length) { toast('مفيش مهام محتاجة توزيع'); return; }
     const load = {};
@@ -494,9 +509,10 @@
       t.doneBy = m.id;
       t.doneByName = m.name;
       t.doneAt = Date.now();
-      S.log.unshift({ id: t.id, title: t.title, by: m.id, byName: m.name, at: t.doneAt, assigned: t.who || null });
+      S.log.unshift({ id: t.id, title: t.title, by: m.id, byName: m.name, at: t.doneAt, assigned: t.who || null, pts: t.pts || 10 });
       S.log = S.log.slice(0, 300);
-      toast(`تسجّلت باسمك يا ${m.name} ✔`);
+      if (!S.tasks.some((x) => x.who === m.id && !x.done)) S.log[0].all = true;
+      toast(S.log[0].all ? `برافو يا ${m.name}! خلّصتي كل مهامك 🎉` : `تسجّلت باسمك يا ${m.name} ✔ (+${t.pts || 10}⭐)`);
     } else {
       t.done = false;
       delete t.doneBy;
@@ -690,7 +706,7 @@
     const fresh = S.log.filter((l) => l.at > prevTop && (!mine || l.by !== mine.id));
     if (syncedOnce && fresh.length) {
       const l = fresh[0];
-      toast(`${member(l.by) ? member(l.by).name : (l.byName || 'عضو')} خلّصت «${l.title}» ✔`);
+      notify(l.all ? 'برافو 🎉' : 'مهمة اتنفّذت', `${member(l.by) ? member(l.by).name : (l.byName || 'عضو')} ${l.all ? 'خلّصت كل مهامها 🎉' : `خلّصت «${l.title}» ✔`}`);
     }
   }
 
@@ -801,8 +817,81 @@
     toast('اتثبّت التطبيق');
   });
 
+  /* ================= المتصدرين والأدمن والإشعارات ================= */
+  let boardRange = 'week';
+  const REMIND_KEY = 'kitchen-remind-v1';
+
+  function renderBoard() {
+    const since = boardRange === 'week' ? Date.now() - WEEK_MS : 0;
+    const rows = S.members.map((m) => {
+      const ls = S.log.filter((l) => l.by === m.id && l.at >= since);
+      return { m, n: ls.length, pts: ls.reduce((a, l) => a + (l.pts || 10), 0) };
+    }).sort((a, b) => b.pts - a.pts || b.n - a.n);
+    const medal = ['🥇', '🥈', '🥉'];
+    const max = Math.max(1, rows[0].pts);
+    const chip = (f, l) => `<button class="chip ${boardRange === f ? 'on' : ''}" data-act="brange" data-f="${f}">${l}</button>`;
+    $('#tab-board').innerHTML = `<div class="chips">${chip('week', 'هذا الأسبوع')}${chip('all', 'الكل')}</div>
+      <ol class="board">${rows.map((r, i) => `<li style="--c:${r.m.color}"><span class="rank">${medal[i] || i + 1}</span>
+        <div class="bw"><b>${esc(r.m.name)}</b><small>${r.n} مهمة</small><i style="width:${Math.round(r.pts / max * 100)}%"></i></div>
+        <span class="pts">${r.pts}⭐</span></li>`).join('')}</ol>
+      <p class="muted">كل مهمة بتخلّصيها بتدّيكي نقاطها اللي حددها الأدمن.</p>`;
+  }
+
+  function daySheet(d) {
+    const opts = (cur) => S.members.map((m) => `<option value="${m.id}" ${m.id === cur ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
+    openSheet(`<h2>مسؤولات ${DAYS[d]}</h2>
+      <label class="field">الطبخ<select id="ovCook">${opts(cookId(d))}</select></label>
+      <label class="field">الترتيب والتنظيف<select id="ovClean">${opts(cleanId(d))}</select></label>
+      <div class="row"><button class="btn" data-act="saveday" data-d="${d}">حفظ</button>
+      <button class="btn soft" data-act="resetday" data-d="${d}">رجوع للدور التلقائي</button></div>`);
+  }
+
+  function adminPanel() {
+    const head = '<h3 class="sub" style="margin-top:0">👑 الأدمن</h3>';
+    if (!S.admins.length) {
+      return `<section class="panel">${head}<p class="help">لسه مفيش أدمن. الأدمن بس هو اللي بيضيف ويعدّل ويحذف المهام ويغيّر مسؤولات الأيام.</p><button class="btn gold" data-act="claimadmin">اجعليني الأدمن</button></section>`;
+    }
+    return `<section class="panel">${head}<div class="chips">${S.members.map((x) => {
+      const a = S.admins.includes(x.id);
+      return `<button class="chip ${a ? 'on' : ''}" ${isAdmin() ? `data-act="toggleadmin" data-id="${x.id}"` : 'disabled'}>${a ? '👑 ' : ''}${esc(x.name)}</button>`;
+    }).join('')}</div><p class="help">${isAdmin() ? 'اضغطي على اسم لإضافته أو إزالته كأدمن.' : 'الأدمن بس يقدر يضيف أدمن تاني.'}</p></section>`;
+  }
+
+  function notePanel() {
+    const p = 'Notification' in window ? Notification.permission : 'unsupported';
+    const body = p === 'granted' ? '<p class="help">مفعّلة ✔ هتوصلك تذكيرات مهام اليوم وإشعار لما حد يخلّص مهامه.</p>'
+      : p === 'unsupported' ? '<p class="help">المتصفح ده مش بيدعم الإشعارات. على الآيفون ثبّتي التطبيق على الشاشة الرئيسية الأول.</p>'
+      : '<button class="btn alt" data-act="notifon">تفعيل الإشعارات</button>';
+    return `<section class="panel"><h3 class="sub" style="margin-top:0">🔔 الإشعارات</h3>${body}<p class="help">بتوصل والتطبيق مفتوح أو في الخلفية. لو اتقفل تمامًا محتاجة سيرفر (Firebase Cloud Messaging).</p></section>`;
+  }
+
+  function notify(title, body) {
+    toast(body);
+    if (!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
+    navigator.serviceWorker.getRegistration().then((r) => {
+      if (r) r.showNotification(title, { body, icon: 'icon-192.png', badge: 'icon-192.png', dir: 'rtl', lang: 'ar' });
+    });
+  }
+
+  function dailyReminder() {
+    const m = me();
+    if (!m || new Date().getHours() < 8) return;
+    const key = new Date().toDateString() + m.id;
+    if (localStorage.getItem(REMIND_KEY) === key) return;
+    const t = todayIdx();
+    const mine = S.tasks.filter((x) => x.who === m.id && !x.done && (x.day === t || x.day < 0));
+    const parts = [];
+    if (cookId(t) === m.id) parts.push('النهارده دورك في الطبخ 🍳');
+    if (cleanId(t) === m.id) parts.push('ودورك في الترتيب والتنظيف 🧹');
+    if (mine.length) parts.push(`عندك ${mine.length} مهام: ${mine.slice(0, 3).map((x) => x.title).join('، ')}`);
+    if (!parts.length) return;
+    localStorage.setItem(REMIND_KEY, key);
+    notify(`مهام ${DAYS[t]}`, parts.join(' — '));
+  }
+
   /* ================= التحكم والأحداث ================= */
   function renderAll() {
+    renderBoard();
     renderSchedule();
     renderTasks();
     renderMembers();
@@ -896,6 +985,7 @@
       case 'tfilter': taskFilter = el.dataset.f; renderTasks(); break;
       case 'toggletask': toggleTask(Number(id), el.checked); break;
       case 'cycletask': {
+        if (!needAdmin()) break;
         const t = S.tasks.find((x) => x.id === Number(id));
         if (t) {
           const i = S.members.findIndex((m) => m.id === t.who);
@@ -905,15 +995,37 @@
         break;
       }
       case 'deltask':
+        if (!needAdmin()) break;
         S.tasks = S.tasks.filter((x) => x.id !== Number(id));
         save(); renderAll();
         break;
       case 'dist': distribute(false); break;
       case 'distall': distribute(true); break;
       case 'cleardone':
+        if (!needAdmin()) break;
         S.tasks = S.tasks.filter((t) => !t.done);
         save(); renderAll(); toast('اتمسحت المهام المنجزة');
         break;
+      case 'editday': if (needAdmin()) daySheet(d); break;
+      case 'saveday':
+        S.overrides[d] = { cook: $('#ovCook').value, clean: $('#ovClean').value };
+        save(); closeSheet(); renderAll(); toast('اتعدّلت مسؤولات اليوم');
+        break;
+      case 'resetday': delete S.overrides[d]; save(); closeSheet(); renderAll(); toast('رجع الدور التلقائي'); break;
+      case 'brange': boardRange = el.dataset.f; renderBoard(); break;
+      case 'claimadmin':
+        if (!requireMe()) break;
+        if (!S.admins.length) { S.admins = [me().id]; save(); renderAll(); toast('بقيتي الأدمن 👑'); }
+        break;
+      case 'toggleadmin':
+        if (!needAdmin()) break;
+        if (S.admins.includes(id)) {
+          if (S.admins.length < 2) { toast('لازم يفضل أدمن واحد على الأقل'); break; }
+          S.admins = S.admins.filter((x) => x !== id);
+        } else S.admins.push(id);
+        save(); renderAll();
+        break;
+      case 'notifon': Notification.requestPermission().then(() => { renderMembers(); dailyReminder(); }); break;
       default: break;
     }
   });
@@ -969,6 +1081,9 @@
   /* ================= تشغيل ================= */
   renderAll();
   renderRecipes();
+  setInterval(dailyReminder, 60000);
+  setTimeout(dailyReminder, 3000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) dailyReminder(); });
 
   const qs = new URLSearchParams(location.search);
   if (qs.get('db') && qs.get('room')) {

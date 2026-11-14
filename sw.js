@@ -1,5 +1,5 @@
 // خدمة التخزين المؤقت: التطبيق يفتح حتى من غير نت، ويجيب آخر نسخة لما النت يرجع
-const CACHE = 'kitchen-week-v7';
+const CACHE = 'kitchen-week-v8';
 const ASSETS = [
   './', 'index.html', 'style.css', 'script.js', 'recipes.js',
   'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'

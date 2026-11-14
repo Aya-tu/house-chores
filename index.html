@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e2a3b">
+  <title>أسبوع المطبخ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="icon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="المطبخ">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="top-row">
+      <h1>أسبوع المطبخ</h1>
+      <button id="meBtn" class="me-btn" data-act="chooseme">👤 مين انتي؟</button>
+    </div>
+    <p id="todayLine"></p>
+  </header>
+
+  <main>
+    <section id="tab-schedule" class="tab active" aria-label="الجدول"></section>
+    <section id="tab-tasks" class="tab" aria-label="المهام"></section>
+    <section id="tab-recipes" class="tab" aria-label="الوصفات"></section>
+    <section id="tab-members" class="tab" aria-label="الأعضاء"></section>
+  </main>
+
+  <nav class="bar" aria-label="التنقل">
+    <button class="active" data-act="tab" data-tab="schedule">الجدول</button>
+    <button data-act="tab" data-tab="tasks">المهام</button>
+    <button data-act="tab" data-tab="recipes">الوصفات</button>
+    <button data-act="tab" data-tab="members">الأعضاء</button>
+  </nav>
+
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-bg" data-act="closesheet"></div>
+    <div class="sheet-panel" role="dialog" aria-modal="true">
+      <button class="sheet-close" data-act="closesheet" aria-label="إغلاق">✕</button>
+      <div id="sheetBody"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="recipes.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

@@ -922,21 +922,26 @@
   const u8 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 
   async function enablePush(url) {
+    let step = 'start';
     try {
       url = String(url).trim().replace(/\/+$/, '');
       if (!/^https:\/\/[^\s/]+/i.test(url)) { toast('الرابط لازم يبدأ بـ https://'); return; }
       if (!getSync()) { toast('فعّلي المزامنة الأول'); return; }
       if ((await Notification.requestPermission()) !== 'granted') { toast('لازم توافقي على الإشعارات'); return; }
-      const reg = await navigator.serviceWorker.ready;
+      step = 'sw';
+      const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((_, rej) => setTimeout(() => rej(new Error('service worker مش شغال')), 6000))]);
+      step = 'key';
       const { key } = await (await fetch(`${url}/key`)).json();
+      step = 'subscribe';
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: u8(key) });
       await caches.open('kitchen-cfg').then((c) => c.put('cfg', new Response(JSON.stringify({ wk: url }))));
+      step = 'save';
       const r = await fetch(`${url}/subscribe`, { method: 'POST', body: JSON.stringify({ room: getSync().room, me: me() ? me().id : '', sub: sub.toJSON() }) });
       if (!r.ok) throw new Error(r.status);
       localStorage.setItem(PUSH_KEY, url);
       renderMembers();
       toast('اتفعّلت الإشعارات حتى والتطبيق مقفول 🔔');
-    } catch (e) { toast('تعذّر التفعيل، اتأكدي من رابط الـ Worker'); }
+    } catch (e) { alert(`تعذّر التفعيل\nالخطوة: ${step}\n${e && e.name ? e.name + ': ' : ''}${e && e.message ? e.message : e}`); }
   }
 
   function pushNotify(title, body) {
